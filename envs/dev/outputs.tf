@@ -1,0 +1,9 @@
+output "app_server_public_ip" { value = module.app_server.public_ip }
+output "app_server_instance_id" { value = module.app_server.instance_id }
+output "database_endpoint" { value = module.database.endpoint }
+output "database_master_secret_arn" { value = module.database.master_secret_arn }
+output "media_bucket" { value = module.storage.media_bucket }
+output "media_cdn_domain" { value = module.storage.cdn_domain }
+output "ecr_repository_urls" { value = module.ecr.repository_urls }
+output "github_deploy_role_arn" { value = module.deploy_roles.deploy_role_arn }
+output "alerts_topic_arn" { value = module.ops.alerts_topic_arn }

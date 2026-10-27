@@ -1,0 +1,105 @@
+name: terraform
+
+on:
+  pull_request:
+    paths: ["envs/**", "modules/**", "bootstrap/**", ".github/workflows/terraform.yml"]
+  push:
+    branches: [main]
+    paths: ["envs/**", "modules/**", ".github/workflows/terraform.yml"]
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Apply the dev plan (needs reviewer approval on the dev-apply environment)"
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write # OIDC to AWS
+  contents: read
+  pull-requests: write
+
+env:
+  TF_VERSION: "1.9.8"
+  AWS_REGION: ap-south-1
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  validate:
+    name: fmt + validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "${{ env.TF_VERSION }}" }
+      - run: terraform fmt -check -recursive
+      - name: validate each root
+        run: |
+          for d in bootstrap envs/dev; do
+            (cd "$d" && terraform init -backend=false -input=false && terraform validate)
+          done
+      - name: security scan (tfsec)
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          soft_fail: true
+
+  plan-dev:
+    name: plan dev
+    needs: validate
+    if: vars.AWS_PLAN_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "${{ env.TF_VERSION }}" }
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: init
+        working-directory: envs/dev
+        run: |
+          cat > backend.hcl <<EOF
+          bucket         = "${{ vars.TF_STATE_BUCKET }}"
+          key            = "dev/terraform.tfstate"
+          region         = "${{ env.AWS_REGION }}"
+          dynamodb_table = "${{ vars.TF_LOCK_TABLE }}"
+          encrypt        = true
+          EOF
+          terraform init -backend-config=backend.hcl -input=false
+      - name: plan
+        working-directory: envs/dev
+        run: terraform plan -input=false -no-color -out=tfplan -var="alert_email=${{ vars.ALERT_EMAIL }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-dev
+          path: envs/dev/tfplan
+          retention-days: 3
+
+  apply-dev:
+    name: apply dev (manual, approved)
+    needs: plan-dev
+    if: github.event_name == 'workflow_dispatch' && inputs.apply
+    runs-on: ubuntu-latest
+    environment: dev-apply # required reviewers configured in repo settings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "${{ env.TF_VERSION }}" }
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: actions/download-artifact@v4
+        with: { name: tfplan-dev, path: envs/dev }
+      - name: init + apply the reviewed plan
+        working-directory: envs/dev
+        run: |
+          cat > backend.hcl <<EOF
+          bucket         = "${{ vars.TF_STATE_BUCKET }}"
+          key            = "dev/terraform.tfstate"
+          region         = "${{ env.AWS_REGION }}"
+          dynamodb_table = "${{ vars.TF_LOCK_TABLE }}"
+          encrypt        = true
+          EOF
+          terraform init -backend-config=backend.hcl -input=false
+          terraform apply -input=false tfplan

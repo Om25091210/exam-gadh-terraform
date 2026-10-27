@@ -1,0 +1,2 @@
+alert_email = "you@example.com"
+# cors_allowed_origins = ["https://app.dev.example.in"]
