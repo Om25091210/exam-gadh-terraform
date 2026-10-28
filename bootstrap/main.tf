@@ -1,8 +1,10 @@
-# Run ONCE by a human with admin credentials (local state, then migrated is optional):
-#   cd bootstrap && terraform init && terraform apply
+# Run ONCE by a human with admin credentials. The first apply uses local state; then add the
+# s3 backend below and run `terraform init -migrate-state -backend-config=backend.hcl` so the
+# state lives in the bucket this stack creates (see backend.hcl.example).
 # Creates the remote-state bucket, the lock table, the GitHub OIDC provider and the roles the
 # Terraform CI workflows assume. Everything else is managed from envs/<environment>.
 terraform {
+  backend "s3" {}
   required_version = ">= 1.9.0"
   required_providers {
     aws = {
