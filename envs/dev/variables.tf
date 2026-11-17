@@ -30,7 +30,7 @@ variable "db_instance_class" {
 variable "enable_schedule" {
   description = "Stop EC2 and RDS outside working hours (IST) to save cost"
   type        = bool
-  default     = true
+  default     = false
 }
 variable "cors_allowed_origins" {
   type    = list(string)
